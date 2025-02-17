@@ -1,5 +1,11 @@
 package dev.rushii.libunbound;
 
+import java.util.Objects;
+
+/**
+ * JNI interface to the native side of this library.
+ */
+@SuppressWarnings("unused")
 public class LibUnbound {
 	private static int cachedBytecodeVersion = -1;
 
@@ -21,5 +27,16 @@ public class LibUnbound {
 		return (cachedBytecodeVersion = (int) getHermesRuntimeBytecodeVersion0());
 	}
 
+	/**
+	 * Quick and potentially inconclusive check to determine whether some bytes are valid hermes bytecode.
+	 *
+	 * @param bytes Nonnull byte array.
+	 */
+	public static boolean isHermesBytecode(byte[] bytes) {
+		return isHermesBytecode0(Objects.requireNonNull(bytes));
+	}
+
 	private static native long getHermesRuntimeBytecodeVersion0();
+
+	private static native boolean isHermesBytecode0(byte[] bytes);
 }

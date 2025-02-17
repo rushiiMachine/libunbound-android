@@ -51,3 +51,40 @@ extern "C" JNIEXPORT jlong Java_dev_rushii_libunbound_LibUnbound_getHermesRuntim
 
     return getBytecodeVersion();
 }
+
+extern "C" JNIEXPORT jboolean Java_dev_rushii_libunbound_LibUnbound_isHermesBytecode0(
+        JNIEnv *env,
+        [[maybe_unused]] jclass clazz,
+        jbyteArray jBytes
+) {
+    if (!hermes.has_value()) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "LibUnbound did not initialize successfully!");
+        return false;
+    }
+
+    // https://github.com/discord/hermes/blob/0.76.2-discord/API/hermes/hermes.h#L50
+    using isHermesBytecode_t = bool (*)(const uint8_t *data, size_t len);
+    auto isHermesBytecode = reinterpret_cast<isHermesBytecode_t>(hermes->getSymbAddress("_ZN8facebook6hermes13HermesRuntime16isHermesBytecodeEPKhm"));
+    if (!isHermesBytecode) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "Failed to find native symbol for facebook::hermes::HermesRuntime::isHermesBytecode(uint8_t*, size_t)");
+        return false;
+    }
+
+    jsize jBytesLength = env->GetArrayLength(jBytes);
+    if (jBytesLength <= 0) {
+        return false;
+    }
+
+    jbyte *bytes = env->GetByteArrayElements(jBytes, nullptr);
+    if (!bytes) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), "Failed to obtain jByteArray");
+        return false;
+    }
+
+    bool isHBC = isHermesBytecode(reinterpret_cast<uint8_t *>(bytes), jBytesLength);
+
+    env->ReleaseByteArrayElements(jBytes, bytes, 0);
+    return isHBC;
+}
