@@ -28,6 +28,4 @@ struct proc_map_t {
 
 bool proc_map_parse(std::vector<proc_map_t> &maps);
 
-void proc_map_fmt(proc_map_t &map, char *out);
-
 #endif //PROC_MAP_UTIL_HPP

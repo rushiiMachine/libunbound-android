@@ -26,6 +26,22 @@ android {
 				}
 			}
 		}
+
+		release {
+			externalNativeBuild {
+				cmake {
+					arguments("-DCMAKE_BUILD_TYPE=MinSizeRel")
+				}
+			}
+		}
+
+		debug {
+			externalNativeBuild {
+				cmake {
+					arguments("-DCMAKE_BUILD_TYPE=Debug")
+				}
+			}
+		}
 	}
 
 	externalNativeBuild {

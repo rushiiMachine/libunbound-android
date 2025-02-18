@@ -50,20 +50,3 @@ bool proc_map_parse(std::vector<proc_map_t> &maps) {
     fclose(fp);
     return true;
 }
-
-
-void proc_map_fmt(proc_map_t &map, char *out) {
-    out += sprintf(out, "%p-%p", map.address_start, map.address_end);
-    out += sprintf(out, " %c%c%c%c",
-                   (map.flags & PROC_MAP_READ) != 0 ? 'r' : '-',
-                   (map.flags & PROC_MAP_WRITE) != 0 ? 'w' : '-',
-                   (map.flags & PROC_MAP_EXEC) != 0 ? 'x' : '-',
-                   (map.flags & PROC_MAP_PRIVATE) != 0 ? 'p' : (map.flags & PROC_MAP_SHARED) != 0 ? 's' : '-');
-
-    out += sprintf(out, " %lx", map.offset);
-    out += sprintf(out, " %x:%x", (int) map.dev_major, (int) map.dev_minor);
-    out += sprintf(out, " %lu", map.inode);
-
-    if (!map.file_name.empty())
-        sprintf(out, " %s", map.file_name.data());
-}
