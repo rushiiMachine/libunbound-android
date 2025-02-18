@@ -13,8 +13,6 @@ extern "C" JNIEXPORT jint JNI_OnLoad([[maybe_unused]] JavaVM *vm, [[maybe_unused
         return JNI_ERR;
     }
 
-    LOGI("LibUnbound loaded!");
-
     HERMES = std::make_shared<SandHook::ElfImg>("libhermes.so");
     if (!HERMES->isValid()) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
@@ -22,6 +20,7 @@ extern "C" JNIEXPORT jint JNI_OnLoad([[maybe_unused]] JavaVM *vm, [[maybe_unused
         return JNI_ERR;
     }
 
+    LOGI("LibUnbound loaded!");
     return JNI_VERSION_1_6;
 }
 

@@ -273,7 +273,6 @@ bool ElfImg::findModuleBase() {
     }
 
     if (!foundMap) {
-        // chng to LOGV
         LOGD("did not find module. may be mmap directly from an apk");
 
         for (auto &map: maps) {
