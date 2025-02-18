@@ -6,12 +6,26 @@
 cmake_minimum_required(VERSION 3.22.1)
 
 set(CMAKE_CXX_STANDARD 23)
+#set(CMAKE_BUILD_TYPE Debug)
+
+include(FetchContent)
+set(FETCHCONTENT_QUIET OFF)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+
+FetchContent_Declare(
+        miniz
+        GIT_REPOSITORY "https://github.com/richgel999/miniz.git"
+        GIT_TAG "0c30a00"
+        GIT_PROGRESS TRUE
+        GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(miniz)
 
 # Declares the project name. The project name can be accessed via ${ PROJECT_NAME},
 # Since this is the top level CMakeLists.txt, the project name is also accessible
 # with ${CMAKE_PROJECT_NAME} (both CMake variables are in-sync within the top level
 # build script scope).
-project("unbound")
+project("unbound" C CXX)
 
 # Creates and names a library, sets it as either STATIC
 # or SHARED, and provides the relative paths to its source code.
@@ -29,7 +43,10 @@ project("unbound")
 add_library(${CMAKE_PROJECT_NAME} SHARED
         # List C/C++ source files with relative paths to this CMakeLists.txt.
         lib.cpp
-        elf_util.cpp)
+        elf_util.cpp
+        zip_util.cpp
+        proc_maps.cpp
+)
 
 # Specifies libraries CMake should link to your target library. You
 # can link libraries from various origins, such as libraries defined in this
@@ -37,4 +54,6 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
 target_link_libraries(${CMAKE_PROJECT_NAME}
         # List libraries link to the target library
         android
-        log)
+        log
+        miniz
+)

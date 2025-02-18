@@ -32,10 +32,11 @@
 namespace SandHook {
     class ElfImg {
     public:
+        ElfImg() : base(nullptr) {};
 
-        ElfImg(std::string_view elf);
+        explicit ElfImg(std::string_view elf);
 
-        template<typename T = void*>
+        template<typename T = void *>
         requires(std::is_pointer_v<T>)
         constexpr const T getSymbAddress(std::string_view name) const {
             auto offset = getSymbOffset(name, GnuHash(name), ElfHash(name));
@@ -46,7 +47,7 @@ namespace SandHook {
             }
         }
 
-        template<typename T = void*>
+        template<typename T = void *>
         requires(std::is_pointer_v<T>)
         constexpr const T getSymbPrefixFirstAddress(std::string_view prefix) const {
             auto offset = PrefixLookupFirst(prefix);
@@ -57,13 +58,13 @@ namespace SandHook {
             }
         }
 
-        template<typename T = void*>
+        template<typename T = void *>
         requires(std::is_pointer_v<T>)
         const std::vector<T> getAllSymbAddress(std::string_view name) const {
             auto offsets = LinearRangeLookup(name);
             std::vector<T> res;
             res.reserve(offsets.size());
-            for (const auto &offset : offsets) {
+            for (const auto &offset: offsets) {
                 res.emplace_back(reinterpret_cast<T>(static_cast<ElfW(Addr)>((uintptr_t) base + offset - bias)));
             }
             return res;
@@ -74,7 +75,7 @@ namespace SandHook {
         }
 
         const std::string name() const {
-            return elf;
+            return elfPath;
         }
 
         ~ElfImg();
@@ -100,7 +101,8 @@ namespace SandHook {
 
         void MayInitLinearMap() const;
 
-        std::string elf;
+        std::string elfPath;
+        size_t elfFileOffset;
         void *base = nullptr;
         char *buffer = nullptr;
         off_t size = 0;

@@ -1,31 +1,32 @@
 #include <jni.h>
 #include <string>
-#include "include/logging.hpp"
-#include "include/elf_util.hpp"
+#include <memory>
+#include "elf_util.hpp"
+#include "logging.hpp"
 
-static std::optional<SandHook::ElfImg> hermes;
+static std::shared_ptr<SandHook::ElfImg> HERMES;
 
 extern "C" JNIEXPORT jint JNI_OnLoad([[maybe_unused]] JavaVM *vm, [[maybe_unused]] void *reserved) {
     JNIEnv *env;
     if (JNI_OK != vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6)) {
-        LOGE("Failed to get JNIEnv");
+        LOGF("Failed to get JNIEnv");
         return JNI_ERR;
-    };
+    }
 
     LOGI("LibUnbound loaded!");
 
-    hermes = SandHook::ElfImg("libhermes.so");
-    if (!hermes->isValid()) {
+    HERMES = std::make_shared<SandHook::ElfImg>("libhermes.so");
+    if (!HERMES->isValid()) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "libhermes has not been loaded into this process!");
-        return -1;
+        return JNI_ERR;
     }
 
     return JNI_VERSION_1_6;
 }
 
-extern "C" JNIEXPORT void JNI_OnUnload(JavaVM *vm, [[maybe_unused]] void *reserved) {
-    hermes.reset();
+extern "C" JNIEXPORT void JNI_OnUnload([[maybe_unused]] JavaVM *vm, [[maybe_unused]] void *reserved) {
+    HERMES.reset();
 }
 
 // Frida script to obtain HBC version:
@@ -35,14 +36,16 @@ extern "C" JNIEXPORT jlong Java_dev_rushii_libunbound_LibUnbound_getHermesRuntim
         JNIEnv *env,
         [[maybe_unused]] jclass clazz
 ) {
-    if (!hermes.has_value()) {
+    LOGD("getHermesRuntimeBytecodeVersion0");
+    if (!HERMES) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "LibUnbound did not initialize successfully!");
         return -1;
     }
 
     // https://github.com/discord/hermes/blob/0.76.2-discord/API/hermes/hermes.h#L51-L52
-    auto getBytecodeVersion = reinterpret_cast<uint32_t (*)()>(hermes->getSymbAddress("_ZN8facebook6hermes13HermesRuntime18getBytecodeVersionEv"));
+    auto getBytecodeVersion = reinterpret_cast<uint32_t (*)()>(HERMES->getSymbAddress(
+            "_ZN8facebook6hermes13HermesRuntime18getBytecodeVersionEv"));
     if (!getBytecodeVersion) {
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
                       "Failed to find native symbol for facebook::hermes::HermesRuntime::getBytecodeVersion()");
@@ -57,7 +60,7 @@ extern "C" JNIEXPORT jboolean Java_dev_rushii_libunbound_LibUnbound_isHermesByte
         [[maybe_unused]] jclass clazz,
         jbyteArray jBytes
 ) {
-    if (!hermes.has_value()) {
+    if (!HERMES) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
                       "LibUnbound did not initialize successfully!");
         return false;
@@ -65,7 +68,8 @@ extern "C" JNIEXPORT jboolean Java_dev_rushii_libunbound_LibUnbound_isHermesByte
 
     // https://github.com/discord/hermes/blob/0.76.2-discord/API/hermes/hermes.h#L50
     using isHermesBytecode_t = bool (*)(const uint8_t *data, size_t len);
-    auto isHermesBytecode = reinterpret_cast<isHermesBytecode_t>(hermes->getSymbAddress("_ZN8facebook6hermes13HermesRuntime16isHermesBytecodeEPKhm"));
+    auto isHermesBytecode = reinterpret_cast<isHermesBytecode_t>(HERMES->getSymbAddress(
+            "_ZN8facebook6hermes13HermesRuntime16isHermesBytecodeEPKhm"));
     if (!isHermesBytecode) {
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
                       "Failed to find native symbol for facebook::hermes::HermesRuntime::isHermesBytecode(uint8_t*, size_t)");

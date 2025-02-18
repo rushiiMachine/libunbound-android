@@ -24,8 +24,11 @@
 #include <unistd.h>
 #include <cassert>
 #include <sys/stat.h>
-#include "include/logging.hpp"
-#include "include/elf_util.hpp"
+#include <miniz.h>
+#include "logging.hpp"
+#include "proc_maps.hpp"
+#include "elf_util.hpp"
+#include "zip_util.hpp"
 
 using namespace SandHook;
 
@@ -35,25 +38,28 @@ inline constexpr auto offsetOf(ElfW(Ehdr) *head, ElfW(Off) off) {
             reinterpret_cast<uintptr_t>(head) + off);
 }
 
-ElfImg::ElfImg(std::string_view base_name) : elf(base_name) {
+ElfImg::ElfImg(std::string_view base_name) : elfPath(base_name) {
     if (!findModuleBase()) {
         base = nullptr;
         return;
     }
 
     //load elf
-    int fd = open(elf.data(), O_RDONLY);
+    int fd = open(elfPath.data(), O_RDONLY);
     if (fd < 0) {
-        LOGE("failed to open {}", elf);
+        LOGE("failed to open {}", elfPath);
         return;
     }
 
-    size = lseek(fd, 0, SEEK_END);
-    if (size <= 0) {
-        LOGE("lseek() failed for {}", elf);
+    // only get size if this elf isn't mapped from apk
+    if (!size && !elfFileOffset) {
+        size = lseek(fd, 0, SEEK_END);
+        if (size <= 0) {
+            LOGE("lseek() failed for {}", elfPath);
+        }
     }
 
-    header = reinterpret_cast<decltype(header)>(mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0));
+    header = reinterpret_cast<decltype(header)>(mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, elfFileOffset));
 
     close(fd);
 
@@ -196,7 +202,7 @@ std::vector<ElfW(Addr)> ElfImg::LinearRangeLookup(std::string_view name) const {
     for (auto [i, end] = symtabs_.equal_range(name); i != end; ++i) {
         auto offset = i->second->st_value;
         res.emplace_back(offset);
-        LOGD("found {} {:#x} in {} in symtab by linear range lookup", name, offset, elf);
+        LOGD("found {} {:#x} in {} in symtab by linear range lookup", name, offset, elfPath);
     }
     return res;
 }
@@ -204,7 +210,7 @@ std::vector<ElfW(Addr)> ElfImg::LinearRangeLookup(std::string_view name) const {
 ElfW(Addr) ElfImg::PrefixLookupFirst(std::string_view prefix) const {
     MayInitLinearMap();
     if (auto i = symtabs_.lower_bound(prefix); i != symtabs_.end() && i->first.starts_with(prefix)) {
-        LOGD("found prefix {} of {} {:#x} in {} in symtab by linear lookup", prefix, i->first, i->second->st_value, elf);
+        LOGD("found prefix {} of {} {:#x} in {} in symtab by linear lookup", prefix, i->first, i->second->st_value, elfPath);
         return i->second->st_value;
     } else {
         return 0;
@@ -213,6 +219,7 @@ ElfW(Addr) ElfImg::PrefixLookupFirst(std::string_view prefix) const {
 
 
 ElfImg::~ElfImg() {
+    LOGD("releasing resources");
     //open elf file local
     if (buffer) {
         free(buffer);
@@ -227,65 +234,119 @@ ElfImg::~ElfImg() {
 ElfW(Addr)
 ElfImg::getSymbOffset(std::string_view name, uint32_t gnu_hash, uint32_t elf_hash) const {
     if (auto offset = GnuLookup(name, gnu_hash); offset > 0) {
-        LOGD("found {} {:#x} in {} in dynsym by gnuhash", name, offset, elf);
+        LOGD("found {} {:#x} in {} in dynsym by gnuhash", name, offset, elfPath);
         return offset;
     } else if (offset = ElfLookup(name, elf_hash); offset > 0) {
-        LOGD("found {} {:#x} in {} in dynsym by elfhash", name, offset, elf);
+        LOGD("found {} {:#x} in {} in dynsym by elfhash", name, offset, elfPath);
         return offset;
     } else if (offset = LinearLookup(name); offset > 0) {
-        LOGD("found {} {:#x} in {} in symtab by linear lookup", name, offset, elf);
+        LOGD("found {} {:#x} in {} in symtab by linear lookup", name, offset, elfPath);
         return offset;
     } else {
         return 0;
     }
-
-}
-
-constexpr inline bool contains(std::string_view a, std::string_view b) {
-    return a.find(b) != std::string_view::npos;
 }
 
 bool ElfImg::findModuleBase() {
-    off_t load_addr;
-    bool found = false;
-    FILE *maps = fopen("/proc/self/maps", "r");
+    std::vector<proc_map_t> maps;
+    proc_map_t *foundMap = nullptr;
 
-    char *buff = nullptr;
-    size_t len = 0;
-    ssize_t nread;
-
-    while ((nread = getline(&buff, &len, maps)) != -1) {
-        std::string_view line{buff, static_cast<size_t>(nread)};
-
-        if ((contains(line, "r-xp") || contains(line, "r--p")) && contains(line, elf)) {
-            LOGD("found: {}", line);
-            if (auto begin = line.find_last_of(' '); begin != std::string_view::npos &&
-                                                     line[++begin] == '/') {
-                found = true;
-                elf = line.substr(begin);
-                if (elf.back() == '\n') elf.pop_back();
-                LOGD("update path: {}", elf);
-                break;
-            }
-        }
-    }
-    if (!found) {
-        if (buff) free(buff);
-        LOGE("failed to read load address for {}", elf);
-        fclose(maps);
+    if (!proc_map_parse(maps)) {
+        LOGE("failed to open or parse /proc/self/maps");
         return false;
     }
 
-    if (char *next = buff; load_addr = strtoul(buff, &next, 16), next == buff) {
-        LOGE("failed to read load address for {}", elf);
+    for (auto &map: maps) {
+        if ((map.flags & PROC_MAP_WRITE) != 0)
+            continue;
+        if ((map.flags & (PROC_MAP_READ | PROC_MAP_PRIVATE)) != (PROC_MAP_READ | PROC_MAP_PRIVATE))
+            continue;
+
+        if (!map.file_name.contains(elfPath))
+            continue;
+
+        LOGD("found map for {}: {}", elfPath, map.file_name.data());
+        elfPath = map.file_name;
+        elfFileOffset = 0;
+        foundMap = &map;
+        break;
     }
 
-    if (buff) free(buff);
+    if (!foundMap) {
+        // chng to LOGV
+        LOGD("did not find module. may be mmap directly from an apk");
 
-    fclose(maps);
+        for (auto &map: maps) {
+            mz_zip_archive zip;
+            memset(&zip, 0, sizeof(mz_zip_archive));
 
-    LOGD("get module base {}: {:#x}", elf, load_addr);
+            if ((map.flags & PROC_MAP_WRITE) != 0)
+                continue;
+            if ((map.flags & (PROC_MAP_READ | PROC_MAP_PRIVATE)) != (PROC_MAP_READ | PROC_MAP_PRIVATE))
+                continue;
 
-    base = reinterpret_cast<void *>(load_addr);
+            if (!map.file_name.ends_with(".apk"))
+                continue;
+
+            // open apk
+            LOGD("checking in apk: {}", map.file_name);
+
+            if (!mz_zip_reader_init_file(&zip, map.file_name.c_str(), MZ_ZIP_FLAG_DO_NOT_SORT_CENTRAL_DIRECTORY)) {
+                LOGD("failed to open apk {}", mz_zip_get_error_string(mz_zip_get_last_error(&zip)));
+                continue;
+            }
+
+            for (int idx = 0; idx < mz_zip_reader_get_num_files(&zip); ++idx) {
+                mz_zip_archive_file_stat zipEntry;
+                std::string_view zipEntryName;
+                uint64_t entryDataOffset;
+
+                if (!mz_zip_reader_file_stat(&zip, idx, &zipEntry))
+                    continue;
+
+                // not what we're looking for
+                if (zipEntry.m_is_directory
+                    || zipEntry.m_is_encrypted
+                    || zipEntry.m_comp_size == 0
+                    || zipEntry.m_comp_size != zipEntry.m_uncomp_size) {
+                    continue;
+                }
+
+                zipEntryName = std::string_view{zipEntry.m_filename};
+
+                // not our lib
+                if (!zipEntryName.starts_with("lib/") || !zipEntryName.ends_with(elfPath))
+                    continue;
+
+                // get entry data offset
+                if (!zip_get_entry_data_offset(&zip, &zipEntry, entryDataOffset))
+                    continue;
+
+                // not mmap'ing our lib
+                if (map.offset != entryDataOffset)
+                    continue;
+
+                LOGD("found lib in apk at path: {} with entry offset {:#x}", zipEntryName, entryDataOffset);
+                foundMap = &map;
+                elfPath = map.file_name;
+                elfFileOffset = entryDataOffset;
+                size = zipEntry.m_comp_size;
+
+                break;
+            }
+
+            mz_zip_reader_end(&zip);
+            if (foundMap) break;
+        }
+    }
+
+    if (!foundMap) {
+        LOGE("did not find module {}", elfPath);
+        return false;
+    }
+
+    LOGD("got module base {}: {:#x}", elfPath, reinterpret_cast<uint64_t>(foundMap->address_start));
+    base = foundMap->address_start;
+
     return true;
 }
