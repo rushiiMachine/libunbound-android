@@ -1,0 +1,66 @@
+name: Publish release
+
+concurrency:
+  group: "release"
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Required actions secrets:
+# SONATYPE_USERNAME: sonatype staging repo user token username
+# SONATYPE_PASSWORD: sonatype staging repo user token password
+# SIGNING_KEY_ID: last 8 chars of master/(singing) subkey fingerprint (gpg --list-keys --keyid-format short)
+# SIGNING_KEY: an armored gpg key: (gpg --armor --export-secret-key <MASTER_ID>) OR (gpg --armor --export-secret-subkey <SHORT_ID>!)
+# SIGNING_PASSWORD: password for key-block
+
+jobs:
+  build:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: 'zulu'
+
+      - name: Setup Ninja
+        uses: seanmiddleditch/gha-setup-ninja@master
+        with:
+          version: 1.12.1
+
+      - name: Build & Publish to Maven
+        env:
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_KEY_ID: ${{ secrets.SIGNING_KEY_ID }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :lib:publishToMavenLocal :lib:publish --stacktrace --no-daemon
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libunbound
+          path: ~/.m2/repository/**
+          if-no-files-found: error
+
+      - name: Prepare Release
+        run: |
+          (cd ~/.m2/repository/ && zip -r /tmp/libunbound.zip .)
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: /tmp/libunbound.zip
