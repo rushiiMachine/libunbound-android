@@ -4,6 +4,8 @@ import java.util.Objects;
 
 /**
  * JNI interface to the native side of this library.
+ * This class can only be loaded after the Hermes native library ({@code libhermes.so}) has been loaded into the process.
+ * If Hermes has not yet been loaded, a {@link RuntimeException} will be thrown upon loading this class.
  */
 @SuppressWarnings("unused")
 public class LibUnbound {
@@ -15,10 +17,8 @@ public class LibUnbound {
 
 	/**
 	 * Obtains the Hermes Bytecode (HBC) version that the Hermes runtime supports.
-	 * This method can only be called after the Hermes native lib has been loaded into the process.
 	 *
 	 * @throws IllegalStateException If Hermes has not yet been loaded.
-	 * @throws RuntimeException      If failing to find the required native symbol.
 	 */
 	public static int getHermesRuntimeBytecodeVersion() {
 		if (cachedBytecodeVersion > 0)
